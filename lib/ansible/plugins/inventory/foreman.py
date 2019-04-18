@@ -72,12 +72,13 @@ validate_certs: False
 from distutils.version import LooseVersion
 
 from ansible.errors import AnsibleError
-from ansible.module_utils._text import to_bytes, to_native
+from ansible.module_utils._text import to_bytes, to_native, to_text
 from ansible.module_utils.common._collections_compat import MutableMapping
 from ansible.plugins.inventory import BaseInventoryPlugin, Cacheable, to_safe_group_name
 
 # 3rd party imports
 try:
+    import re
     import requests
     if LooseVersion(requests.__version__) < LooseVersion('1.1.0'):
         raise ImportError
@@ -141,7 +142,7 @@ class InventoryModule(BaseInventoryPlugin, Cacheable):
                 # FIXME: This assumes 'return type' matches a specific query,
                 #        it will break if we expand the queries and they dont have different types
                 if 'results' not in json:
-                    # /hosts/:id dos not have a 'results' key
+                    # /hosts/:id does not have a 'results' key
                     results = json
                     break
                 elif isinstance(json['results'], MutableMapping):
@@ -194,6 +195,16 @@ class InventoryModule(BaseInventoryPlugin, Cacheable):
             raise ValueError("More than one set of facts returned for '%s'" % host)
         return facts
 
+    def to_safe(self, word):
+        '''Converts 'bad' characters in a string to underscores
+        so they can be used as Ansible groups
+
+        >>> ForemanInventory.to_safe("foo-bar baz")
+        'foo_barbaz'
+        '''
+        regex = r"[^A-Za-z0-9\_]"
+        return re.sub(regex, "_", word.replace(" ", ""))
+
     def _populate(self):
 
         for host in self._get_hosts():
@@ -221,13 +232,23 @@ class InventoryModule(BaseInventoryPlugin, Cacheable):
 
                 # set host vars from params
                 if self.get_option('want_params'):
+                    groupby = dict()
                     for p in self._get_all_params_by_id(host['id']):
+                        groupby[p['name']] = self.to_safe(to_text(p['value']))
                         try:
                             self.inventory.set_variable(host['name'], p['name'], p['value'])
                         except ValueError as e:
                             self.display.warning("Could not set hostvar %s to '%s' for the '%s' host, skipping:  %s" %
                                                  (p['name'], to_native(p['value']), host, to_native(e)))
-
+                    # TODO: Replace hardcoded pattern with pattern from config
+                    #for pattern in self.get_option(group_patterns):
+                    for pattern in ['{pconsole_stack}-{pconsole_env}-{pconsole_app}']:
+                        try:
+                            group_name = to_safe_group_name(pattern.format(**groupby))
+                            group_name = self.inventory.add_group(group_name)
+                            self.inventory.add_child(group_name, host['name'])
+                        except KeyError:
+                            pass  # Host not part of this group
                 # set host vars from facts
                 if self.get_option('want_facts'):
                     self.inventory.set_variable(host['name'], 'ansible_facts', self._get_facts(host))

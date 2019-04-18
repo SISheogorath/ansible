@@ -22,7 +22,10 @@ PYTHONPATH=${PYTHONPATH-""}
 PATH=${PATH-""}
 MANPATH=${MANPATH-$(manpath)}
 PYTHON=$(which python 2>/dev/null || which python3 2>/dev/null)
-PYTHON_BIN=${PYTHON_BIN-$PYTHON}
+PYTHON_BIN=${PYTHON_BIN:-$PYTHON}
+echo Python: $PYTHON
+echo command: $PYTHON_BIN -c "import os; print(os.path.realpath('$HACKING_DIR'))"
+
 
 verbosity=${1-info} # Defaults to `info' if unspecified
 
